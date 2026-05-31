@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Image Uploader</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Image Uploader</h1>
+      <p class="subtitle">Enter an identifier, capture or select images, then upload.</p>
+    </header>
+
+    <div class="card">
+
+      <!-- Identifier field -->
+      <div class="form-group">
+        <label for="identifier">Identifier (used as folder name)</label>
+        <input
+          type="text"
+          id="identifier"
+          placeholder="e.g. abc@gmail.com"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <!-- Shown when a folder is selected from the list below -->
+        <div id="selectedFolderTag" class="selected-folder-tag hidden">
+          Adding images to: <strong id="selectedFolderName"></strong>
+          <button id="clearFolderBtn" class="clear-folder-btn" title="Clear selection">&times;</button>
+        </div>
+      </div>
+
+      <!-- Image sources -->
+      <div class="form-group">
+        <span class="field-label">Add Images</span>
+
+        <!-- Live camera -->
+        <div class="camera-box" id="cameraBox">
+          <video id="cameraPreview" autoplay playsinline muted></video>
+          <canvas id="captureCanvas"></canvas>
+          <div class="camera-actions">
+            <button class="btn btn-outline" id="startCameraBtn">Open Camera</button>
+            <button class="btn btn-primary hidden" id="captureBtn">Capture Photo</button>
+            <button class="btn btn-danger hidden" id="stopCameraBtn">Close Camera</button>
+          </div>
+        </div>
+
+        <div class="or-divider"><span>or</span></div>
+
+        <!-- File picker -->
+        <label for="fileInput" class="file-drop-zone" id="dropZone">
+          <div class="drop-icon">&#8679;</div>
+          <span class="drop-text">Click to choose images (or drag &amp; drop)</span>
+          <span class="drop-hint">JPEG, PNG, WebP &mdash; up to 20 MB each</span>
+        </label>
+        <input type="file" id="fileInput" accept="image/*" multiple />
+      </div>
+
+      <!-- Preview grid -->
+      <div id="previewGrid" class="preview-grid hidden"></div>
+      <div id="previewCount" class="preview-count hidden"></div>
+
+      <!-- Submit -->
+      <button class="btn btn-success btn-full" id="submitBtn">Upload Images</button>
+    </div>
+
+    <!-- Status banner -->
+    <div id="statusBanner" class="status-banner hidden"></div>
+
+    <!-- Existing folders -->
+    <section class="folders-section">
+      <div class="folders-header">
+        <h2>Existing Folders</h2>
+        <button class="btn btn-outline btn-sm" id="refreshFoldersBtn">Refresh</button>
+      </div>
+      <div id="folderGrid" class="folder-grid">
+        <p class="folders-empty">No folders yet.</p>
+      </div>
+    </section>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
