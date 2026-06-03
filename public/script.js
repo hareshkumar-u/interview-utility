@@ -42,9 +42,9 @@ startCameraBtn.addEventListener('click', async () => {
     state.stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: 'environment',
-        width:       { ideal: 3508 },   // A4 @ 300dpi
-        height:      { ideal: 2480 },
-        aspectRatio: { ideal: 297 / 210 } // portrait A4
+        width:       { ideal: 2480 },   // portrait A4 short edge
+        height:      { ideal: 3508 },   // portrait A4 long edge
+        aspectRatio: { ideal: 210 / 297 } // portrait A4
       }
     });
     cameraPreview.srcObject = state.stream;
@@ -69,9 +69,22 @@ captureBtn.addEventListener('click', () => {
   const sx = Math.round(vw * m),       sy = Math.round(vh * m);
   const sw = Math.round(vw * (1-2*m)), sh = Math.round(vh * (1-2*m));
 
-  captureCanvas.width  = sw;
-  captureCanvas.height = sh;
-  captureCanvas.getContext('2d').drawImage(cameraPreview, sx, sy, sw, sh, 0, 0, sw, sh);
+  const isLandscape = vw > vh;
+  if (isLandscape) {
+    // Camera returned landscape — rotate 90° CW to produce portrait output
+    captureCanvas.width  = sh;
+    captureCanvas.height = sw;
+    const ctx = captureCanvas.getContext('2d');
+    ctx.save();
+    ctx.translate(sh, 0);
+    ctx.rotate(Math.PI / 2);
+    ctx.drawImage(cameraPreview, sx, sy, sw, sh, 0, 0, sw, sh);
+    ctx.restore();
+  } else {
+    captureCanvas.width  = sw;
+    captureCanvas.height = sh;
+    captureCanvas.getContext('2d').drawImage(cameraPreview, sx, sy, sw, sh, 0, 0, sw, sh);
+  }
 
   captureCanvas.toBlob(blob => {
     if (!blob) return;
