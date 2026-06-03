@@ -23,6 +23,7 @@ const selectedFolderTag  = $('selectedFolderTag');
 const selectedFolderName = $('selectedFolderName');
 const clearFolderBtn     = $('clearFolderBtn');
 const refreshFoldersBtn  = $('refreshFoldersBtn');
+const downloadAllBtn     = $('downloadAllBtn');
 const folderGrid         = $('folderGrid');
 
 // Track which folder card is currently active
@@ -249,6 +250,31 @@ clearFolderBtn.addEventListener('click', () => {
 });
 
 refreshFoldersBtn.addEventListener('click', loadFolders);
+
+downloadAllBtn.addEventListener('click', async () => {
+  downloadAllBtn.disabled    = true;
+  downloadAllBtn.textContent = 'Zipping…';
+  try {
+    const res = await fetch('/download');
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showStatus(data.message || 'Nothing to download.', 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'uploads.zip';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showStatus('Download failed: ' + err.message, 'error');
+  } finally {
+    downloadAllBtn.disabled    = false;
+    downloadAllBtn.textContent = '\u2193 Download All';
+  }
+});
 
 /* ── Folders list ─────────────────────────────────────────── */
 async function loadFolders() {

@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const archiver = require('archiver');
 
 const app = express();
 const PORT = 3000;
@@ -112,12 +113,38 @@ app.get('/folders', (_req, res) => {
     }
 });
 
+// Download entire uploads folder as a zip
+app.get('/download', (_req, res) => {
+    if (!fs.existsSync(UPLOADS_DIR) || fs.readdirSync(UPLOADS_DIR).length === 0) {
+        return res.status(404).json({ success: false, message: 'No uploads found.' });
+    }
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="uploads.zip"');
+
+    const archive = new archiver.ZipArchive('zip', { zlib: { level: 6 } });
+    archive.on('error', err => {
+        console.error('Archive error:', err);
+        if (!res.headersSent) res.status(500).end();
+    });
+    archive.pipe(res);
+    archive.directory(UPLOADS_DIR, 'uploads');
+    archive.finalize();
+});
+
 // Multer error handler (file size / type rejections)
 app.use((err, _req, res, _next) => {
     res.status(400).json({ success: false, message: err.message });
 });
 
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
+    // Resolve the local LAN IP so users know the network address
+    // const { networkInterfaces } = require('os');
+    // const lanIp = Object.values(networkInterfaces())
+    //     .flat()
+    //     .find(iface => iface.family === 'IPv4' && !iface.internal)?.address ?? 'unknown';
+
     console.log(`Image Uploader running on:`);
     console.log(`  Local   → http://localhost:${PORT}`);
+    // console.log(`  Network → http://${lanIp}:${PORT}  (share this with other devices)`);
 });
