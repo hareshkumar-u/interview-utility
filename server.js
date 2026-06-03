@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const archiver = require('archiver');
+const { ZipArchive } = require('archiver');
 
 const app = express();
 const PORT = 3000;
@@ -122,7 +122,7 @@ app.get('/download', (_req, res) => {
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="uploads.zip"');
 
-    const archive = new archiver.ZipArchive('zip', { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
     archive.on('error', err => {
         console.error('Archive error:', err);
         if (!res.headersSent) res.status(500).end();
@@ -130,6 +130,67 @@ app.get('/download', (_req, res) => {
     archive.pipe(res);
     archive.directory(UPLOADS_DIR, 'uploads');
     archive.finalize();
+});
+
+// Download a single folder as a zip
+app.get('/download/:name', (req, res) => {
+    try {
+        const folderName    = sanitizeFolderName(req.params.name);
+        const folderPath    = path.resolve(path.join(UPLOADS_DIR, folderName));
+        const resolvedUploads = path.resolve(UPLOADS_DIR);
+        if (!folderPath.startsWith(resolvedUploads + path.sep)) {
+            return res.status(400).json({ success: false, message: 'Invalid folder name.' });
+        }
+        if (!fs.existsSync(folderPath)) {
+            return res.status(404).json({ success: false, message: 'Folder not found.' });
+        }
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${folderName}.zip"`);
+        const archive = new ZipArchive({ zlib: { level: 6 } });
+        archive.on('error', err => {
+            console.error('Archive error:', err);
+            if (!res.headersSent) res.status(500).end();
+        });
+        archive.pipe(res);
+        archive.directory(folderPath, folderName);
+        archive.finalize();
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    }
+});
+
+// Delete a single folder
+app.delete('/folders/:name', (req, res) => {
+    try {
+        const folderName = sanitizeFolderName(req.params.name);
+        const folderPath = path.resolve(path.join(UPLOADS_DIR, folderName));
+        const resolvedUploads = path.resolve(UPLOADS_DIR);
+        if (!folderPath.startsWith(resolvedUploads + path.sep)) {
+            return res.status(400).json({ success: false, message: 'Invalid folder name.' });
+        }
+        if (!fs.existsSync(folderPath)) {
+            return res.status(404).json({ success: false, message: 'Folder not found.' });
+        }
+        fs.rmSync(folderPath, { recursive: true, force: true });
+        res.json({ success: true, message: `Folder "${folderName}" deleted.` });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    }
+});
+
+// Delete all folders
+app.delete('/folders', (_req, res) => {
+    try {
+        if (!fs.existsSync(UPLOADS_DIR)) {
+            return res.json({ success: true, message: 'Nothing to delete.' });
+        }
+        const entries = fs.readdirSync(UPLOADS_DIR, { withFileTypes: true })
+            .filter(e => e.isDirectory());
+        entries.forEach(e => fs.rmSync(path.join(UPLOADS_DIR, e.name), { recursive: true, force: true }));
+        res.json({ success: true, message: `${entries.length} folder(s) deleted.` });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    }
 });
 
 // Multer error handler (file size / type rejections)

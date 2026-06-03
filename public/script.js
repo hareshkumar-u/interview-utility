@@ -24,6 +24,7 @@ const selectedFolderName = $('selectedFolderName');
 const clearFolderBtn     = $('clearFolderBtn');
 const refreshFoldersBtn  = $('refreshFoldersBtn');
 const downloadAllBtn     = $('downloadAllBtn');
+const deleteAllBtn       = $('deleteAllBtn');
 const folderGrid         = $('folderGrid');
 
 // Track which folder card is currently active
@@ -251,6 +252,23 @@ clearFolderBtn.addEventListener('click', () => {
 
 refreshFoldersBtn.addEventListener('click', loadFolders);
 
+deleteAllBtn.addEventListener('click', async () => {
+  if (!confirm('Delete ALL folders and images? This cannot be undone.')) return;
+  deleteAllBtn.disabled    = true;
+  deleteAllBtn.textContent = 'Deleting…';
+  try {
+    const res  = await fetch('/folders', { method: 'DELETE' });
+    const data = await res.json();
+    showStatus(data.message, data.success ? 'success' : 'error');
+    if (data.success) { clearFolderSelection(); loadFolders(); }
+  } catch (err) {
+    showStatus('Delete failed: ' + err.message, 'error');
+  } finally {
+    deleteAllBtn.disabled    = false;
+    deleteAllBtn.textContent = '\u{1F5D1} Delete All';
+  }
+});
+
 downloadAllBtn.addEventListener('click', async () => {
   downloadAllBtn.disabled    = true;
   downloadAllBtn.textContent = 'Zipping…';
@@ -309,6 +327,62 @@ function renderFolders(folders) {
       <span class="folder-count">${count} image${count !== 1 ? 's' : ''}</span>
     `;
     card.addEventListener('click', () => selectFolder(name, card));
+
+    // Per-folder download button
+    const dlBtn = document.createElement('button');
+    dlBtn.className   = 'folder-action-btn folder-download-btn';
+    dlBtn.title       = `Download "${name}" as zip`;
+    dlBtn.textContent = '\u2193';
+    dlBtn.addEventListener('click', async e => {
+      e.stopPropagation();
+      dlBtn.disabled    = true;
+      dlBtn.textContent = '\u23F3';
+      try {
+        const res = await fetch(`/download/${encodeURIComponent(name)}`);
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          showStatus(data.message || 'Download failed.', 'error');
+          return;
+        }
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `${name}.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        showStatus('Download failed: ' + err.message, 'error');
+      } finally {
+        dlBtn.disabled    = false;
+        dlBtn.textContent = '\u2193';
+      }
+    });
+    card.appendChild(dlBtn);
+
+    // Per-folder delete button
+    const delBtn = document.createElement('button');
+    delBtn.className   = 'folder-action-btn folder-delete-btn';
+    delBtn.title       = `Delete "${name}"`;
+    delBtn.textContent = '\u00D7';
+    delBtn.addEventListener('click', async e => {
+      e.stopPropagation();
+      if (!confirm(`Delete folder "${name}" and all its images?`)) return;
+      delBtn.disabled = true;
+      try {
+        const res  = await fetch(`/folders/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        const data = await res.json();
+        showStatus(data.message, data.success ? 'success' : 'error');
+        if (data.success) {
+          if (identifierInput.value === name) clearFolderSelection();
+          loadFolders();
+        }
+      } catch (err) {
+        showStatus('Delete failed: ' + err.message, 'error');
+        delBtn.disabled = false;
+      }
+    });
+    card.appendChild(delBtn);
     folderGrid.appendChild(card);
   });
 
