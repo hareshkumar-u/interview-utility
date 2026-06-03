@@ -8,8 +8,10 @@ const state = {
 const $ = id => document.getElementById(id);
 
 const identifierInput = $('identifier');
+const cameraViewport  = $('cameraViewport');
 const cameraPreview   = $('cameraPreview');
 const captureCanvas   = $('captureCanvas');
+const captureFlash    = $('captureFlash');
 const startCameraBtn  = $('startCameraBtn');
 const captureBtn      = $('captureBtn');
 const stopCameraBtn   = $('stopCameraBtn');
@@ -25,6 +27,10 @@ const clearFolderBtn     = $('clearFolderBtn');
 const refreshFoldersBtn  = $('refreshFoldersBtn');
 const downloadAllBtn     = $('downloadAllBtn');
 const deleteAllBtn       = $('deleteAllBtn');
+const createFoldersBtn   = $('createFoldersBtn');
+const createFolderNames  = $('createFolderNames');
+const parentFolder       = $('parentFolder');
+const createParentFolder = $('createParentFolder');
 const folderGrid         = $('folderGrid');
 
 // Track which folder card is currently active
@@ -34,10 +40,15 @@ let activeFolderCard = null;
 startCameraBtn.addEventListener('click', async () => {
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 } }
+      video: {
+        facingMode: 'environment',
+        width:       { ideal: 3508 },   // A4 @ 300dpi
+        height:      { ideal: 2480 },
+        aspectRatio: { ideal: 297 / 210 } // portrait A4
+      }
     });
     cameraPreview.srcObject = state.stream;
-    cameraPreview.style.display = 'block';
+    cameraViewport.classList.remove('hidden');
     startCameraBtn.classList.add('hidden');
     captureBtn.classList.remove('hidden');
     stopCameraBtn.classList.remove('hidden');
@@ -47,15 +58,25 @@ startCameraBtn.addEventListener('click', async () => {
 });
 
 captureBtn.addEventListener('click', () => {
-  captureCanvas.width  = cameraPreview.videoWidth;
-  captureCanvas.height = cameraPreview.videoHeight;
-  captureCanvas.getContext('2d').drawImage(cameraPreview, 0, 0);
+  // Flash feedback
+  captureFlash.classList.add('active');
+  setTimeout(() => captureFlash.classList.remove('active'), 50);
+
+  // Crop to the guide area (8% inset on all sides)
+  const vw = cameraPreview.videoWidth;
+  const vh = cameraPreview.videoHeight;
+  const m  = 0.08;
+  const sx = Math.round(vw * m),       sy = Math.round(vh * m);
+  const sw = Math.round(vw * (1-2*m)), sh = Math.round(vh * (1-2*m));
+
+  captureCanvas.width  = sw;
+  captureCanvas.height = sh;
+  captureCanvas.getContext('2d').drawImage(cameraPreview, sx, sy, sw, sh, 0, 0, sw, sh);
 
   captureCanvas.toBlob(blob => {
     if (!blob) return;
-    const name = `capture-${Date.now()}.jpg`;
-    addImage(blob, name);
-  }, 'image/jpeg', 0.92);
+    addImage(blob, `doc-${Date.now()}.jpg`);
+  }, 'image/jpeg', 0.95);
 });
 
 stopCameraBtn.addEventListener('click', closeCamera);
@@ -66,7 +87,7 @@ function closeCamera() {
     state.stream = null;
   }
   cameraPreview.srcObject = null;
-  cameraPreview.style.display = 'none';
+  cameraViewport.classList.add('hidden');
   startCameraBtn.classList.remove('hidden');
   captureBtn.classList.add('hidden');
   stopCameraBtn.classList.add('hidden');
@@ -168,6 +189,7 @@ submitBtn.addEventListener('click', async () => {
 
   const formData = new FormData();
   formData.append('identifier', identifier);
+  if (parentFolder.value) formData.append('parent', parentFolder.value);
   state.images.forEach(({ blob, name }) => formData.append('images', blob, name));
 
   submitBtn.disabled    = true;
@@ -184,6 +206,7 @@ submitBtn.addEventListener('click', async () => {
       state.images.forEach(({ objectUrl }) => URL.revokeObjectURL(objectUrl));
       state.images = [];
       identifierInput.value = '';
+      parentFolder.value    = '';
       renderPreviews();
       closeCamera();
       clearFolderSelection();
@@ -212,18 +235,17 @@ function showStatus(message, type) {
 }
 
 /* ── Folder selection ─────────────────────────────────────── */
-function selectFolder(name, cardEl) {
-  // Populate identifier and show tag
-  identifierInput.value = name;
-  selectedFolderName.textContent = name;
+function selectFolder(name, parent, cardEl) {
+  identifierInput.value  = name;
+  parentFolder.value     = parent || '';
+  const displayPath      = parent ? `${parent} / ${name}` : name;
+  selectedFolderName.textContent = displayPath;
   selectedFolderTag.classList.remove('hidden');
 
-  // Highlight the clicked card
   if (activeFolderCard) activeFolderCard.classList.remove('active');
   activeFolderCard = cardEl;
   cardEl.classList.add('active');
 
-  // Scroll up to the form
   identifierInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
   identifierInput.focus();
 }
@@ -246,11 +268,38 @@ identifierInput.addEventListener('input', () => {
 
 clearFolderBtn.addEventListener('click', () => {
   identifierInput.value = '';
+  parentFolder.value    = '';
   clearFolderSelection();
   identifierInput.focus();
 });
 
 refreshFoldersBtn.addEventListener('click', loadFolders);
+
+createFoldersBtn.addEventListener('click', async () => {
+  const names = createFolderNames.value.trim();
+  if (!names) {
+    showStatus('Please enter at least one folder name.', 'error');
+    createFolderNames.focus();
+    return;
+  }
+  createFoldersBtn.disabled    = true;
+  createFoldersBtn.textContent = 'Creating…';
+  try {
+    const res  = await fetch('/folders/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names, parent: createParentFolder.value || undefined })
+    });
+    const data = await res.json();
+    showStatus(data.message, data.success ? 'success' : 'error');
+    if (data.success) { createFolderNames.value = ''; loadFolders(); }
+  } catch (err) {
+    showStatus('Error: ' + err.message, 'error');
+  } finally {
+    createFoldersBtn.disabled    = false;
+    createFoldersBtn.textContent = 'Create Folders';
+  }
+});
 
 deleteAllBtn.addEventListener('click', async () => {
   if (!confirm('Delete ALL folders and images? This cannot be undone.')) return;
@@ -301,9 +350,82 @@ async function loadFolders() {
     const res  = await fetch('/folders');
     const data = await res.json();
     renderFolders(data.folders || []);
+    updateParentSelects(data.folders || []);
   } catch {
     folderGrid.innerHTML = '<p class="folders-empty">Could not load folders.</p>';
   }
+}
+
+function updateParentSelects(folders) {
+  [parentFolder, createParentFolder].forEach(sel => {
+    const current = sel.value;
+    sel.innerHTML = '<option value="">— Root (no parent) —</option>';
+    folders.forEach(({ name }) => {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      if (name === current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  });
+}
+
+const FOLDER_SVG = `<svg class="folder-icon" viewBox="0 0 48 40" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 8C4 5.79 5.79 4 8 4H18L22 10H40C42.21 10 44 11.79 44 14V34C44 36.21 42.21 38 40 38H8C5.79 38 4 36.21 4 34V8Z" fill="currentColor" opacity="0.85"/></svg>`;
+
+function makeBtn(cls, title, text) {
+  const btn = document.createElement('button');
+  btn.className = cls; btn.title = title; btn.textContent = text;
+  return btn;
+}
+
+async function doDownloadFolder(folderPath, zipName, btn) {
+  btn.disabled = true; btn.textContent = '\u23F3';
+  try {
+    const encodedPath = folderPath.split('/').map(encodeURIComponent).join('/');
+    const res = await fetch(`/download/${encodedPath}`);
+    if (!res.ok) { const d = await res.json().catch(() => ({})); showStatus(d.message || 'Download failed.', 'error'); return; }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = `${zipName}.zip`; a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) { showStatus('Download failed: ' + err.message, 'error'); }
+  finally { btn.disabled = false; btn.textContent = '\u2193'; }
+}
+
+async function doDeleteFolder(folderPath, btn, onSuccess) {
+  btn.disabled = true;
+  try {
+    const encodedPath = folderPath.split('/').map(encodeURIComponent).join('/');
+    const res  = await fetch(`/folders/${encodedPath}`, { method: 'DELETE' });
+    const data = await res.json();
+    showStatus(data.message, data.success ? 'success' : 'error');
+    if (data.success) onSuccess();
+    else btn.disabled = false;
+  } catch (err) { showStatus('Delete failed: ' + err.message, 'error'); btn.disabled = false; }
+}
+
+function makeFolderCard(name, folderPath, parentName, count) {
+  const card = document.createElement('button');
+  card.className = 'folder-card'; card.dataset.name = name; card.dataset.path = folderPath;
+  card.title     = `Add images to "${folderPath}"`;
+  card.innerHTML = `${FOLDER_SVG}<span class="folder-name">${escapeHtml(name)}</span><span class="folder-count">${count} image${count !== 1 ? 's' : ''}</span>`;
+  card.addEventListener('click', () => selectFolder(name, parentName || '', card));
+
+  const dlBtn  = makeBtn('folder-action-btn folder-download-btn', `Download "${folderPath}"`, '\u2193');
+  dlBtn.addEventListener('click', e => { e.stopPropagation(); doDownloadFolder(folderPath, name, dlBtn); });
+
+  const delBtn = makeBtn('folder-action-btn folder-delete-btn', `Delete "${folderPath}"`, '\u00D7');
+  delBtn.addEventListener('click', async e => {
+    e.stopPropagation();
+    if (!confirm(`Delete "${folderPath}" and all its contents?`)) return;
+    doDeleteFolder(folderPath, delBtn, () => {
+      if (identifierInput.value === name && parentFolder.value === (parentName || '')) clearFolderSelection();
+      loadFolders();
+    });
+  });
+
+  card.appendChild(dlBtn); card.appendChild(delBtn);
+  return card;
 }
 
 function renderFolders(folders) {
@@ -313,89 +435,64 @@ function renderFolders(folders) {
   }
 
   folderGrid.innerHTML = '';
-  folders.forEach(({ name, count }) => {
-    const card = document.createElement('button');
-    card.className   = 'folder-card';
-    card.dataset.name = name;
-    card.title       = `Add images to "${name}"`;
-    card.innerHTML   = `
-      <svg class="folder-icon" viewBox="0 0 48 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M4 8C4 5.79 5.79 4 8 4H18L22 10H40C42.21 10 44 11.79 44 14V34C44 36.21 42.21 38 40 38H8C5.79 38 4 36.21 4 34V8Z"
-              fill="currentColor" opacity="0.85"/>
-      </svg>
-      <span class="folder-name">${escapeHtml(name)}</span>
-      <span class="folder-count">${count} image${count !== 1 ? 's' : ''}</span>
-    `;
-    card.addEventListener('click', () => selectFolder(name, card));
+  folders.forEach(({ name, path: fPath, count, children }) => {
+    if (children && children.length > 0) {
+      // Group with child cards
+      const group  = document.createElement('div');
+      group.className = 'folder-group';
 
-    // Per-folder download button
-    const dlBtn = document.createElement('button');
-    dlBtn.className   = 'folder-action-btn folder-download-btn';
-    dlBtn.title       = `Download "${name}" as zip`;
-    dlBtn.textContent = '\u2193';
-    dlBtn.addEventListener('click', async e => {
-      e.stopPropagation();
-      dlBtn.disabled    = true;
-      dlBtn.textContent = '\u23F3';
-      try {
-        const res = await fetch(`/download/${encodeURIComponent(name)}`);
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          showStatus(data.message || 'Download failed.', 'error');
-          return;
-        }
-        const blob = await res.blob();
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement('a');
-        a.href     = url;
-        a.download = `${name}.zip`;
-        a.click();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        showStatus('Download failed: ' + err.message, 'error');
-      } finally {
-        dlBtn.disabled    = false;
-        dlBtn.textContent = '\u2193';
-      }
-    });
-    card.appendChild(dlBtn);
+      const header = document.createElement('div');
+      header.className = 'folder-group-header';
 
-    // Per-folder delete button
-    const delBtn = document.createElement('button');
-    delBtn.className   = 'folder-action-btn folder-delete-btn';
-    delBtn.title       = `Delete "${name}"`;
-    delBtn.textContent = '\u00D7';
-    delBtn.addEventListener('click', async e => {
-      e.stopPropagation();
-      if (!confirm(`Delete folder "${name}" and all its images?`)) return;
-      delBtn.disabled = true;
-      try {
-        const res  = await fetch(`/folders/${encodeURIComponent(name)}`, { method: 'DELETE' });
-        const data = await res.json();
-        showStatus(data.message, data.success ? 'success' : 'error');
-        if (data.success) {
-          if (identifierInput.value === name) clearFolderSelection();
-          loadFolders();
-        }
-      } catch (err) {
-        showStatus('Delete failed: ' + err.message, 'error');
-        delBtn.disabled = false;
-      }
-    });
-    card.appendChild(delBtn);
-    folderGrid.appendChild(card);
+      const chevron = document.createElement('span');
+      chevron.className = 'folder-group-chevron';
+      chevron.innerHTML = '&#9660;'; // ▼ down
+
+      const nameSvg = document.createElement('span');
+      nameSvg.innerHTML = FOLDER_SVG;
+
+      const nameSpan  = document.createElement('span');
+      nameSpan.className = 'folder-group-name';
+      nameSpan.textContent = name;
+
+      const countSpan = document.createElement('span');
+      countSpan.className = 'folder-group-count';
+      countSpan.textContent = `${children.length} subfolder${children.length !== 1 ? 's' : ''}`;
+
+      const dlBtn  = makeBtn('folder-action-btn folder-download-btn', `Download "${name}"`, '\u2193');
+      dlBtn.addEventListener('click', e => { e.stopPropagation(); doDownloadFolder(fPath, name, dlBtn); });
+
+      const delBtn = makeBtn('folder-action-btn folder-delete-btn', `Delete "${name}" group`, '\u00D7');
+      delBtn.addEventListener('click', async e => {
+        e.stopPropagation();
+        if (!confirm(`Delete group "${name}" and ALL its subfolders?`)) return;
+        doDeleteFolder(fPath, delBtn, () => { clearFolderSelection(); loadFolders(); });
+      });
+
+      header.append(chevron, nameSvg, nameSpan, countSpan, dlBtn, delBtn);
+
+      const childGrid = document.createElement('div');
+      childGrid.className = 'folder-group-children';
+      children.forEach(c => childGrid.appendChild(makeFolderCard(c.name, c.path, name, c.count)));
+
+      // Toggle collapse on header click
+      header.addEventListener('click', () => {
+        const collapsed = group.classList.toggle('collapsed');
+        chevron.innerHTML = collapsed ? '&#9654;' : '&#9660;'; // ▶ or ▼
+      });
+
+      group.append(header, childGrid);
+      folderGrid.appendChild(group);
+    } else {
+      folderGrid.appendChild(makeFolderCard(name, fPath, null, count));
+    }
   });
 
-  // Re-apply active state if the same folder is still selected
+  // Re-apply active state
   if (activeFolderCard) {
-    const selectedName = identifierInput.value.trim();
-    const match = folderGrid.querySelector(`[data-name="${CSS.escape(selectedName)}"]`);
-    if (match) {
-      match.classList.add('active');
-      activeFolderCard = match;
-    } else {
-      activeFolderCard = null;
-    }
+    const match = folderGrid.querySelector(`[data-path="${CSS.escape(activeFolderCard.dataset.path || '')}"]`);
+    if (match) { match.classList.add('active'); activeFolderCard = match; }
+    else activeFolderCard = null;
   }
 }
 

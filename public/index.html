@@ -15,9 +15,17 @@
 
     <div class="card">
 
+      <!-- Parent folder selector -->
+      <div class="form-group">
+        <label for="parentFolder">Save inside folder <span class="label-hint">(optional)</span></label>
+        <select id="parentFolder" class="parent-folder-select">
+          <option value="">— Root (no parent) —</option>
+        </select>
+      </div>
+
       <!-- Identifier field -->
       <div class="form-group">
-        <label for="identifier">Identifier (used as folder name)</label>
+        <label for="identifier">Identifier (sub-folder name)</label>
         <input
           type="text"
           id="identifier"
@@ -38,12 +46,22 @@
 
         <!-- Live camera -->
         <div class="camera-box" id="cameraBox">
-          <video id="cameraPreview" autoplay playsinline muted></video>
+          <div class="camera-viewport hidden" id="cameraViewport">
+            <video id="cameraPreview" autoplay playsinline muted></video>
+            <div class="doc-guide">
+              <div class="doc-corner tl"></div>
+              <div class="doc-corner tr"></div>
+              <div class="doc-corner bl"></div>
+              <div class="doc-corner br"></div>
+            </div>
+            <div class="capture-flash" id="captureFlash"></div>
+            <span class="doc-hint">Align document within the frame</span>
+          </div>
           <canvas id="captureCanvas"></canvas>
           <div class="camera-actions">
-            <button class="btn btn-outline" id="startCameraBtn">Open Camera</button>
-            <button class="btn btn-primary hidden" id="captureBtn">Capture Photo</button>
-            <button class="btn btn-danger hidden" id="stopCameraBtn">Close Camera</button>
+            <button class="btn btn-outline" id="startCameraBtn">&#128247; Open Camera</button>
+            <button class="btn btn-success btn-full hidden" id="captureBtn">&#9711; Capture Document</button>
+            <button class="btn btn-danger hidden" id="stopCameraBtn">Close</button>
           </div>
         </div>
 
@@ -68,6 +86,26 @@
 
     <!-- Status banner -->
     <div id="statusBanner" class="status-banner hidden"></div>
+
+    <!-- Create folders -->
+    <section class="folders-section">
+      <h2>Create Folders</h2>
+      <div class="create-folders-box">
+        <div class="form-group" style="margin-bottom:10px">
+          <label for="createParentFolder">Save inside folder <span class="label-hint">(optional)</span></label>
+          <select id="createParentFolder" class="parent-folder-select">
+            <option value="">— Root (no parent) —</option>
+          </select>
+        </div>
+        <textarea
+          id="createFolderNames"
+          class="create-folder-textarea"
+          placeholder="Enter names separated by commas or new lines&#10;e.g. alice@gmail.com, bob@gmail.com&#10;carol@gmail.com"
+          rows="4"
+        ></textarea>
+        <button class="btn btn-primary" id="createFoldersBtn">Create Folders</button>
+      </div>
+    </section>
 
     <!-- Existing folders -->
     <section class="folders-section">

@@ -51,14 +51,17 @@ app.post('/upload', upload.array('images', 50), (req, res) => {
             return res.status(400).json({ success: false, message: 'No images received.' });
         }
 
-        const folderName = sanitizeFolderName(req.body.identifier);
-        const folderPath = path.join(UPLOADS_DIR, folderName);
+        const parentName  = req.body.parent ? sanitizeFolderName(req.body.parent) : '';
+        const folderName  = sanitizeFolderName(req.body.identifier);
+        const folderPath  = parentName
+            ? path.join(UPLOADS_DIR, parentName, folderName)
+            : path.join(UPLOADS_DIR, folderName);
 
         // Guard against path traversal even after sanitization
-        const resolvedFolder = path.resolve(folderPath);
+        const resolvedFolder  = path.resolve(folderPath);
         const resolvedUploads = path.resolve(UPLOADS_DIR);
         if (!resolvedFolder.startsWith(resolvedUploads + path.sep)) {
-            return res.status(400).json({ success: false, message: 'Invalid folder name.' });
+            return res.status(400).json({ success: false, message: 'Invalid folder path.' });
         }
 
         fs.mkdirSync(resolvedFolder, { recursive: true });
@@ -79,11 +82,14 @@ app.post('/upload', upload.array('images', 50), (req, res) => {
             return filename;
         });
 
+        const displayPath = parentName ? `${parentName}/${folderName}` : folderName;
         res.json({
             success: true,
-            message: `${savedFiles.length} image(s) saved to folder "${folderName}"`,
+            message: `${savedFiles.length} image(s) saved to "${displayPath}"`,
             folder: folderName,
-            files: savedFiles
+            parent: parentName || null,
+            path:   displayPath,
+            files:  savedFiles
         });
     } catch (err) {
         console.error(err);
@@ -98,18 +104,69 @@ app.get('/folders', (_req, res) => {
             return res.json({ folders: [] });
         }
         const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|bmp|avif|tiff?)$/i;
-        const entries   = fs.readdirSync(UPLOADS_DIR, { withFileTypes: true });
-        const folders   = entries
+        const entries   = fs.readdirSync(UPLOADS_DIR, { withFileTypes: true })
             .filter(e => e.isDirectory())
-            .map(e => {
-                const files = fs.readdirSync(path.join(UPLOADS_DIR, e.name))
-                    .filter(f => IMAGE_EXT.test(f));
-                return { name: e.name, count: files.length };
-            })
             .sort((a, b) => a.name.localeCompare(b.name));
+
+        const folders = entries.map(e => {
+            const entryPath  = path.join(UPLOADS_DIR, e.name);
+            const subEntries = fs.readdirSync(entryPath, { withFileTypes: true });
+            const directCount = subEntries.filter(s => !s.isDirectory() && IMAGE_EXT.test(s.name)).length;
+            const children    = subEntries
+                .filter(s => s.isDirectory())
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(s => {
+                    const count = fs.readdirSync(path.join(entryPath, s.name))
+                        .filter(f => IMAGE_EXT.test(f)).length;
+                    return { name: s.name, path: `${e.name}/${s.name}`, count };
+                });
+            return { name: e.name, path: e.name, count: directCount, children };
+        });
         res.json({ folders });
     } catch (err) {
         res.status(500).json({ folders: [], error: err.message });
+    }
+});
+
+// Create empty folders from a comma/newline-delimited list
+app.post('/folders/create', express.json(), (req, res) => {
+    try {
+        const raw = req.body?.names;
+        if (!raw || typeof raw !== 'string') {
+            return res.status(400).json({ success: false, message: 'No names provided.' });
+        }
+        const parentName = req.body.parent ? sanitizeFolderName(req.body.parent) : '';
+        const names = raw
+            .split(/[,\n]+/)
+            .map(n => sanitizeFolderName(n.trim()))
+            .filter(n => n && n !== 'default');
+
+        if (names.length === 0) {
+            return res.status(400).json({ success: false, message: 'No valid folder names found.' });
+        }
+
+        const resolvedUploads = path.resolve(UPLOADS_DIR);
+        const created = [], skipped = [];
+
+        names.forEach(name => {
+            const folderPath = path.resolve(
+                parentName ? path.join(UPLOADS_DIR, parentName, name) : path.join(UPLOADS_DIR, name)
+            );
+            if (!folderPath.startsWith(resolvedUploads + path.sep)) return;
+            if (fs.existsSync(folderPath)) {
+                skipped.push(name);
+            } else {
+                fs.mkdirSync(folderPath, { recursive: true });
+                created.push(name);
+            }
+        });
+
+        const parts = [];
+        if (created.length) parts.push(`${created.length} folder(s) created`);
+        if (skipped.length) parts.push(`${skipped.length} already existed`);
+        res.json({ success: true, message: parts.join(', ') + '.', created, skipped });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
 });
 
@@ -132,47 +189,54 @@ app.get('/download', (_req, res) => {
     archive.finalize();
 });
 
-// Download a single folder as a zip
-app.get('/download/:name', (req, res) => {
+// Download a single folder or nested folder as a zip
+app.get('/download/*', (req, res) => {
     try {
-        const folderName    = sanitizeFolderName(req.params.name);
-        const folderPath    = path.resolve(path.join(UPLOADS_DIR, folderName));
+        const segments    = req.params[0].split('/').map(s => sanitizeFolderName(s)).filter(Boolean);
+        if (segments.length < 1 || segments.length > 2) {
+            return res.status(400).json({ success: false, message: 'Invalid path.' });
+        }
+        const folderPath    = path.resolve(path.join(UPLOADS_DIR, ...segments));
         const resolvedUploads = path.resolve(UPLOADS_DIR);
         if (!folderPath.startsWith(resolvedUploads + path.sep)) {
-            return res.status(400).json({ success: false, message: 'Invalid folder name.' });
+            return res.status(400).json({ success: false, message: 'Invalid folder path.' });
         }
         if (!fs.existsSync(folderPath)) {
             return res.status(404).json({ success: false, message: 'Folder not found.' });
         }
+        const zipName = segments.join('_');
         res.setHeader('Content-Type', 'application/zip');
-        res.setHeader('Content-Disposition', `attachment; filename="${folderName}.zip"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${zipName}.zip"`);
         const archive = new ZipArchive({ zlib: { level: 6 } });
         archive.on('error', err => {
             console.error('Archive error:', err);
             if (!res.headersSent) res.status(500).end();
         });
         archive.pipe(res);
-        archive.directory(folderPath, folderName);
+        archive.directory(folderPath, segments[segments.length - 1]);
         archive.finalize();
     } catch (err) {
         res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
 });
 
-// Delete a single folder
-app.delete('/folders/:name', (req, res) => {
+// Delete a single folder or nested folder
+app.delete('/folders/*', (req, res) => {
     try {
-        const folderName = sanitizeFolderName(req.params.name);
-        const folderPath = path.resolve(path.join(UPLOADS_DIR, folderName));
+        const segments   = req.params[0].split('/').map(s => sanitizeFolderName(s)).filter(Boolean);
+        if (segments.length < 1 || segments.length > 2) {
+            return res.status(400).json({ success: false, message: 'Invalid path.' });
+        }
+        const folderPath = path.resolve(path.join(UPLOADS_DIR, ...segments));
         const resolvedUploads = path.resolve(UPLOADS_DIR);
         if (!folderPath.startsWith(resolvedUploads + path.sep)) {
-            return res.status(400).json({ success: false, message: 'Invalid folder name.' });
+            return res.status(400).json({ success: false, message: 'Invalid folder path.' });
         }
         if (!fs.existsSync(folderPath)) {
             return res.status(404).json({ success: false, message: 'Folder not found.' });
         }
         fs.rmSync(folderPath, { recursive: true, force: true });
-        res.json({ success: true, message: `Folder "${folderName}" deleted.` });
+        res.json({ success: true, message: `"${segments.join('/')}" deleted.` });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
